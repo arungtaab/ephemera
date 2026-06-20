@@ -22,6 +22,21 @@ export interface WifiPayload {
   security: 'WPA' | 'WEP' | 'nopass'
 }
 
+type NdefWriteRecord = {
+  recordType: string
+  data: string | BufferSource
+  mediaType?: string
+  lang?: string
+  encoding?: string
+}
+
+const utf8 = new TextEncoder()
+
+/** MIME records require ArrayBuffer / ArrayBufferView — not plain strings. */
+function encodeUtf8(value: string): Uint8Array {
+  return utf8.encode(value)
+}
+
 export function buildVcard(p: VcardPayload): string {
   const lines = [
     'BEGIN:VCARD',
@@ -59,42 +74,55 @@ export function getPreview(
   }
 }
 
+function buildNdefRecord(
+  template: NfcTemplate,
+  data: UrlPayload | VcardPayload | TextPayload | WifiPayload,
+): NdefWriteRecord {
+  switch (template) {
+    case 'url': {
+      const p = data as UrlPayload
+      const url = p.url.trim()
+      if (!url) throw new Error('Enter a URL first')
+      return { recordType: 'url', data: url }
+    }
+    case 'vcard': {
+      const vcard = buildVcard(data as VcardPayload)
+      if (!(data as VcardPayload).name.trim()) {
+        throw new Error('Enter at least a name for the contact card')
+      }
+      return {
+        recordType: 'mime',
+        mediaType: 'text/vcard',
+        data: encodeUtf8(vcard) as BufferSource,
+      }
+    }
+    case 'text': {
+      const text = (data as TextPayload).text.trim()
+      if (!text) throw new Error('Enter text to write')
+      return { recordType: 'text', data: text, lang: 'en' }
+    }
+    case 'wifi': {
+      const p = data as WifiPayload
+      if (!p.ssid.trim()) throw new Error('Enter a WiFi network name')
+      const wifi = buildWifiRecord(p)
+      return {
+        recordType: 'mime',
+        mediaType: 'application/vnd.wifi.wsc',
+        data: encodeUtf8(wifi) as BufferSource,
+      }
+    }
+  }
+}
+
 export async function writeNfcTag(
   template: NfcTemplate,
   data: UrlPayload | VcardPayload | TextPayload | WifiPayload,
 ): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const NDEFReader = (window as any).NDEFReader
-  if (!NDEFReader) throw new Error('Web NFC not supported')
+  if (!NDEFReader) throw new Error('Web NFC not supported — use Chrome on Android over HTTPS')
 
+  const record = buildNdefRecord(template, data)
   const reader = new NDEFReader()
-  let record: { recordType: string; data: string | BufferSource; mediaType?: string }
-
-  switch (template) {
-    case 'url': {
-      const p = data as UrlPayload
-      record = { recordType: 'url', data: p.url }
-      break
-    }
-    case 'vcard': {
-      const vcard = buildVcard(data as VcardPayload)
-      record = { recordType: 'mime', mediaType: 'text/vcard', data: vcard }
-      break
-    }
-    case 'text': {
-      record = { recordType: 'text', data: (data as TextPayload).text }
-      break
-    }
-    case 'wifi': {
-      const wifi = buildWifiRecord(data as WifiPayload)
-      record = {
-        recordType: 'mime',
-        mediaType: 'application/vnd.wifi.wsc',
-        data: wifi,
-      }
-      break
-    }
-  }
-
   await reader.write({ records: [record] })
 }

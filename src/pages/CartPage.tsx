@@ -78,7 +78,7 @@ export function CartPage() {
                 </div>
                 <div className="text-right">
                   <p className="font-ransom text-lg">
-                    ${item.price + (item.withNfc ? item.nfcPrice : 0)}
+                    HKD {item.price + (item.withNfc ? item.nfcPrice : 0)}
                   </p>
                   <button
                     onClick={() => removeItem(item.id)}
@@ -94,7 +94,7 @@ export function CartPage() {
             <span className="font-serif text-sm font-bold uppercase tracking-widest text-[#F5A623]">
               Subtotal
             </span>
-            <span className="font-ransom text-3xl text-[#F5A623]">${subtotal}</span>
+            <span className="font-ransom text-3xl text-[#F5A623]">HKD {subtotal}</span>
           </div>
           <Button className="mt-6 w-full" onClick={() => setStep('shipping')}>
             Checkout (demo)
@@ -143,7 +143,7 @@ export function CartPage() {
               Back
             </Button>
             <Button type="submit" className="flex-1">
-              Place order · ${subtotal}
+              Place order · HKD {subtotal}
             </Button>
           </div>
         </form>

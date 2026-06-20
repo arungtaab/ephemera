@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { getProductBySlug } from '../data/products'
+import { formatPrice, getProductBySlug, NFC_ADDON_LABEL } from '../data/products'
 import { useCart } from '../features/cart/CartContext'
 import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
@@ -66,7 +66,7 @@ export function ProductDetailPage() {
             {product.name}
           </h1>
           <p className="mt-4 text-[#F4F0E8]/80">{product.description}</p>
-          <p className="mt-4 font-ransom text-3xl text-[#F5A623]">${product.price}</p>
+          <p className="mt-4 font-ransom text-3xl text-[#F5A623]">{formatPrice(product)}</p>
 
           {sizing && (
             <Card className="mt-4 !bg-[#3D2F75] !text-[#F5A623]">
@@ -111,16 +111,18 @@ export function ProductDetailPage() {
                 className="h-5 w-5 accent-[#F5A623]"
               />
               <div>
-                <p className="font-bold text-[#F5A623]">Add NFC sticker pack</p>
+                <p className="font-bold text-[#F5A623]">{NFC_ADDON_LABEL}</p>
                 <p className="text-sm text-[#F4F0E8]/60">
-                  +${product.nfcAddonPrice} · Program from the app
+                  +HKD {product.nfcAddonPrice} · Upgrade to Smart Set features
                 </p>
               </div>
             </label>
           )}
 
           <div className="mt-6 flex flex-wrap gap-3">
-            <Button onClick={handleAdd}>Add to cart · ${total}</Button>
+            <Button onClick={handleAdd}>
+              Add to cart · HKD {total}
+            </Button>
             <Button
               to={`/try-on?color=${encodeURIComponent(color.hex)}&shape=${product.shape}`}
               variant="secondary"

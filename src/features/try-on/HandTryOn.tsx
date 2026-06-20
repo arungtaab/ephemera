@@ -16,16 +16,18 @@ import {
 } from '../../lib/camera'
 import { isMobile } from '../../lib/platform'
 import {
-  drawNailOverlay,
-  FINGER_TIPS,
-  NAIL_BASE,
-  type NailOverlayConfig,
-} from './nailOverlays'
+  computeNailSegment,
+  computeVideoLayout,
+  smoothLandmarks,
+  type NormLandmark,
+} from './handMapping'
+import { drawNailOverlay, type NailOverlayConfig } from './nailOverlays'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 
 const SHAPES: NailShape[] = ['oval', 'almond', 'coffin']
 const INIT_TIMEOUT_MS = 25_000
+const SMOOTH_ALPHA = 0.42
 
 const MODEL_URL =
   'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
@@ -43,12 +45,17 @@ async function getHandLandmarker(signal: AbortSignal): Promise<HandLandmarker> {
       )
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
+      const options = {
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: 'CPU' as const },
+        runningMode: 'VIDEO' as const,
+        numHands: 1,
+        minHandDetectionConfidence: 0.55,
+        minHandPresenceConfidence: 0.55,
+        minTrackingConfidence: 0.55,
+      }
+
       try {
-        cachedLandmarker = await HandLandmarker.createFromOptions(vision, {
-          baseOptions: { modelAssetPath: MODEL_URL, delegate: 'CPU' },
-          runningMode: 'VIDEO',
-          numHands: 1,
-        })
+        cachedLandmarker = await HandLandmarker.createFromOptions(vision, options)
       } catch {
         cachedLandmarker = await HandLandmarker.createFromOptions(vision, {
           baseOptions: { modelAssetPath: MODEL_URL, delegate: 'CPU' },
@@ -91,6 +98,7 @@ export function HandTryOn() {
   const animRef = useRef<number>(0)
   const sessionRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
+  const smoothLmRef = useRef<NormLandmark[] | null>(null)
 
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [status, setStatus] = useState('Starting camera…')
@@ -98,6 +106,7 @@ export function HandTryOn() {
   const [mirrored, setMirrored] = useState(!isMobile())
   const [handDetected, setHandDetected] = useState(false)
   const [landmarkerReady, setLandmarkerReady] = useState(false)
+  const [sizeScale, setSizeScale] = useState(1)
   const [config, setConfig] = useState<NailOverlayConfig>({
     shape: (searchParams.get('shape') as NailShape) || 'oval',
     color: searchParams.get('color') || COLOR_PALETTE[2],
@@ -108,6 +117,7 @@ export function HandTryOn() {
     cancelAnimationFrame(animRef.current)
     abortRef.current?.abort()
     abortRef.current = null
+    smoothLmRef.current = null
     stopMediaStream(streamRef.current)
     streamRef.current = null
     const video = videoRef.current
@@ -205,7 +215,6 @@ export function HandTryOn() {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    let lastTime = -1
     let detectTick = 0
     let active = true
 
@@ -227,24 +236,8 @@ export function HandTryOn() {
       canvas.width = displayW
       canvas.height = displayH
 
-      const videoAspect = vw / vh
-      const displayAspect = displayW / displayH
-      let drawW: number
-      let drawH: number
-      let offsetX: number
-      let offsetY: number
-
-      if (videoAspect > displayAspect) {
-        drawH = displayH
-        drawW = displayH * videoAspect
-        offsetX = (displayW - drawW) / 2
-        offsetY = 0
-      } else {
-        drawW = displayW
-        drawH = displayW / videoAspect
-        offsetX = 0
-        offsetY = (displayH - drawH) / 2
-      }
+      const layout = computeVideoLayout(vw, vh, displayW, displayH, mirrored)
+      const { drawW, drawH, offsetX, offsetY } = layout
 
       ctx.fillStyle = '#000'
       ctx.fillRect(0, 0, displayW, displayH)
@@ -259,37 +252,40 @@ export function HandTryOn() {
       }
       ctx.restore()
 
-      const mapX = (nx: number) =>
-        mirrored ? offsetX + drawW - nx * drawW : offsetX + nx * drawW
-      const mapY = (ny: number) => offsetY + ny * drawH
-
       if (landmarkerReady && landmarker) {
-        const now = performance.now()
-        if (lastTime !== video.currentTime) {
-          lastTime = video.currentTime
-          try {
-            const result: HandLandmarkerResult = landmarker.detectForVideo(video, now)
-            const hasHand = !!result.landmarks[0]
-            if (detectTick++ % 12 === 0) setHandDetected(hasHand)
+        try {
+          const result: HandLandmarkerResult = landmarker.detectForVideo(
+            video,
+            performance.now(),
+          )
+          const hasHand = !!result.landmarks[0]
+          if (detectTick++ % 10 === 0) setHandDetected(hasHand)
 
-            if (hasHand) {
-              const lm = result.landmarks[0]
-              for (let i = 0; i < FINGER_TIPS.length; i++) {
-                const tip = lm[FINGER_TIPS[i]]
-                const base = lm[NAIL_BASE[i]]
-                drawNailOverlay(
-                  ctx,
-                  mapX(base.x),
-                  mapY(base.y),
-                  mapX(tip.x),
-                  mapY(tip.y),
-                  config,
-                )
-              }
-            }
-          } catch {
-            // skip frame
+          if (hasHand) {
+            const raw = result.landmarks[0].map((l) => ({ x: l.x, y: l.y, z: l.z }))
+            smoothLmRef.current = smoothLandmarks(smoothLmRef.current, raw, SMOOTH_ALPHA)
+          } else {
+            smoothLmRef.current = null
           }
+        } catch {
+          // skip frame
+        }
+      }
+
+      const lm = smoothLmRef.current
+      if (lm) {
+        for (let i = 0; i < 5; i++) {
+          const seg = computeNailSegment(lm, i, layout, sizeScale)
+          if (!seg) continue
+          drawNailOverlay(
+            ctx,
+            seg.rootX,
+            seg.rootY,
+            seg.tipX,
+            seg.tipY,
+            seg.widthPx,
+            config,
+          )
         }
       }
 
@@ -299,9 +295,10 @@ export function HandTryOn() {
     animRef.current = requestAnimationFrame(render)
     return () => {
       active = false
+      smoothLmRef.current = null
       cancelAnimationFrame(animRef.current)
     }
-  }, [phase, landmarkerReady, config, mirrored])
+  }, [phase, landmarkerReady, config, mirrored, sizeScale])
 
   const capture = () => {
     const canvas = canvasRef.current
@@ -343,7 +340,7 @@ export function HandTryOn() {
 
         {phase === 'ready' && landmarkerReady && !handDetected && (
           <div className="pointer-events-none absolute bottom-4 left-4 right-4 rounded-sm bg-black/60 px-3 py-2 text-center text-xs text-[#F4F0E8]">
-            Hold your hand in frame — palm facing camera, fingers spread
+            Show the back of your hand — nails facing camera, fingers spread, good light
           </div>
         )}
       </div>
@@ -389,19 +386,35 @@ export function HandTryOn() {
           </div>
         </div>
 
-        <div className="mt-4">
-          <label className="font-serif text-[10px] font-bold uppercase tracking-widest text-stone-500">
-            Opacity
-          </label>
-          <input
-            type="range"
-            min={0.5}
-            max={1}
-            step={0.05}
-            value={config.opacity}
-            onChange={(e) => setConfig({ ...config, opacity: parseFloat(e.target.value) })}
-            className="mt-1 w-full accent-[#F5A623]"
-          />
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="font-serif text-[10px] font-bold uppercase tracking-widest text-stone-500">
+              Nail size
+            </label>
+            <input
+              type="range"
+              min={0.65}
+              max={1.45}
+              step={0.05}
+              value={sizeScale}
+              onChange={(e) => setSizeScale(parseFloat(e.target.value))}
+              className="mt-1 w-full accent-[#F5A623]"
+            />
+          </div>
+          <div>
+            <label className="font-serif text-[10px] font-bold uppercase tracking-widest text-stone-500">
+              Opacity
+            </label>
+            <input
+              type="range"
+              min={0.5}
+              max={1}
+              step={0.05}
+              value={config.opacity}
+              onChange={(e) => setConfig({ ...config, opacity: parseFloat(e.target.value) })}
+              className="mt-1 w-full accent-[#F5A623]"
+            />
+          </div>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-3">
@@ -414,8 +427,12 @@ export function HandTryOn() {
         </div>
 
         <p className="mt-4 text-[10px] text-stone-500">
-          Mac + Chrome: allow camera in System Settings and in the site lock icon ·
-          quit Zoom/FaceTime if the camera is busy
+          Preview uses hand landmarks — adjust size to match your fingers. Production would add
+          nail segmentation for pixel-perfect fit.
+        </p>
+        <p className="mt-2 text-[10px] text-stone-500">
+          Mac + Chrome: allow camera in System Settings and in the site lock icon · quit
+          Zoom/FaceTime if the camera is busy
         </p>
       </Card>
     </div>

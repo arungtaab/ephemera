@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { products } from '../data/products'
+import { formatPrice, products } from '../data/products'
 import { Badge } from '../components/Badge'
 import { Card } from '../components/Card'
 import { PageHeader } from '../components/PageHeader'
@@ -9,7 +9,7 @@ export function ShopPage() {
     <div className="mx-auto max-w-6xl px-4 py-12">
       <PageHeader
         title="Shop"
-        subtitle="Home-compostable press-on sets · optional NFC at checkout"
+        subtitle="Finished press-on sets · optional Smart Set NFC at checkout"
       />
 
       <div className="mt-10 grid gap-6 sm:grid-cols-2">
@@ -39,7 +39,7 @@ export function ShopPage() {
                 {product.description}
               </p>
               <div className="mt-4 flex items-center justify-between">
-                <span className="font-ransom text-xl">${product.price}</span>
+                <span className="font-ransom text-xl">{formatPrice(product)}</span>
                 <span className="text-[10px] font-bold uppercase tracking-widest text-stone-400">
                   {product.shape} · {product.finish}
                 </span>
