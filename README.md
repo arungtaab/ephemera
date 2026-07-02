@@ -2,13 +2,17 @@
 
 Home compostable bioplastic press-on nails — demo PWA for Enactus Sleep Competition.
 
+## Pitch materials
+
+5-minute deck copy, timed script, demo flow, and presenter roles: [`pitch/`](./pitch/README.md)
+
 ## Features
 
 - Brand landing + mock shop with cart/checkout
 - NFC programmer (URL, vCard, text, WiFi) with QR fallback
 - AR try-on with MediaPipe Hand Landmarker
-- CV sizing with credit-card calibration + quiz fallback
-- Installable PWA (indigo + vivid orange branding)
+- CV sizing with HK coin calibration + quiz fallback
+- Installable PWA (purple + gold zine branding)
 
 ## Stack
 
